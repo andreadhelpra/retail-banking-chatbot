@@ -13,7 +13,7 @@ graph TD
     subgraph Client Layer
         A1[Mobile app]
         A2[Web banking]
-        A3[WhatsApp]
+        A3[3rd party chat apps]
         A4[Branch kiosks]
     end
 
