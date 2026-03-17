@@ -2,8 +2,8 @@
   "customers": [
     {
       "id": "cust_001",
-      "name": "Jean Dupont",
-      "email": "jean.dupont@email.com",
+      "name": "Andrea Dhelpra",
+      "email": "andrea.dhelpra@email.com",
       "phone": "+33 6 12 34 56 78",
       "accounts": [
         {"id": "acc_001", "type": "checking", "label": "Compte Courant", "balance": 3245.67, "currency": "EUR", "iban": "FR76 3000 1007 1600 0000 0000 123"},

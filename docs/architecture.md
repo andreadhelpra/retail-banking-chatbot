@@ -4,7 +4,60 @@
 
 Before diving into architecture, let me ground us on why the design choices matter. BNP's retail banking context imposes constraints you won't find in a typical SaaS chatbot: PSD2/DSP2 regulatory compliance for payment operations, GDPR for data residency, the ACPR's expectations around AI explainability, and the reality that your core banking systems — likely a mix of mainframe COBOL and more recent API layers — aren't going away. The architecture must respect these boundaries while delivering sub-2-second response times for FAQ queries and sub-5-second end-to-end for transactional operations.
 
-The system I'm proposing uses a multi-agent orchestration pattern built on Mistral models, with a dedicated supervisor agent routing to specialized sub-agents for FAQ resolution and transactional execution. Let me walk you through the layers. This is the 30,000-foot view. Let me now break down each critical layer, starting with the orchestration logic — the brain of the system.
+The system I'm proposing uses a multi-agent orchestration pattern built on Mistral models, with a dedicated supervisor agent routing to specialized sub-agents for FAQ resolution and transactional execution. Let me walk you through the layers.
+
+### High-level system architecture
+
+```mermaid
+graph TD
+    subgraph Client Layer
+        A1[Mobile app]
+        A2[Web banking]
+        A3[WhatsApp]
+        A4[Branch kiosks]
+    end
+
+    subgraph Security Perimeter
+        B[API gateway + OAuth 2.0 / mTLS<br/><i>Rate limiting, JWT validation, session binding</i>]
+    end
+
+    subgraph Orchestration Layer
+        C[Supervisor agent — Mistral Large<br/><i>Intent classification, routing, context mgmt</i>]
+    end
+
+    subgraph Specialist Agents
+        D1[FAQ agent<br/><i>RAG + knowledge base</i>]
+        D2[Action agent<br/><i>Card lock, transfers</i>]
+        D3[Guardrails agent<br/><i>PII filter, compliance</i>]
+    end
+
+    subgraph Banking Backend
+        E1[Knowledge store<br/><i>Vector DB + CMS</i>]
+        E2[Core banking APIs<br/><i>ESB / middleware layer</i>]
+        E3[Audit log<br/><i>Immutable trace store</i>]
+    end
+
+    A1 & A2 & A3 & A4 --> B
+    B --> C
+    C --> D1 & D2
+    C -.-> D3
+    D1 --> E1
+    D2 --> E2
+    D2 --> E3
+    D3 -.-> E3
+
+    style C fill:#d8b4fe,stroke:#a78bfa
+    style D1 fill:#99f6e4,stroke:#5eead4
+    style D2 fill:#fed7aa,stroke:#fdba74
+    style D3 fill:#fecdd3,stroke:#fda4af
+    style E1 fill:#bfdbfe,stroke:#93c5fd
+    style E2 fill:#bfdbfe,stroke:#93c5fd
+    style E3 fill:#bfdbfe,stroke:#93c5fd
+```
+
+> Purple = orchestration · Teal = retrieval · Coral = execution · Pink = safety · Blue = infrastructure
+
+This is the 30,000-foot view. Let me now break down each critical layer, starting with the orchestration logic — the brain of the system.
 
 ## 2. The supervisor agent — intent routing and context management
 
@@ -13,6 +66,29 @@ The supervisor agent is the single entry point for all user messages. It runs on
 Intent classification uses a structured output schema. The supervisor produces a JSON decision object that includes the detected intent category, a confidence score, extracted entities (account IDs, card references, amounts), and the target agent. If confidence falls below 0.85, it triggers a clarification turn rather than guessing — in banking, a misrouted "lock my card" is not a minor error.
 
 The context window carries a compressed session state: the authenticated user's profile (pre-loaded at session start via the API gateway), the last N turns, and any pending action confirmations. This is not stored in the model's context alone — a Redis-backed session store holds the canonical state, and the supervisor rehydrates from it on each turn.
+
+### Supervisor agent routing flow
+
+```mermaid
+flowchart TD
+    A[User message] --> B[Session rehydration — Redis]
+    B --> C[Intent classification — Mistral Large<br/><i>Structured JSON output</i>]
+    C --> D{Confidence >= 0.85?}
+    D -- Yes --> E1[FAQ agent<br/><i>Mistral Small + RAG</i>]
+    D -- Yes --> E2[Action agent<br/><i>Mistral Large + tools</i>]
+    D -- Yes --> E3[Handoff agent<br/><i>Route to human</i>]
+    D -- No --> F[Clarify]
+
+    F --> A
+
+    style C fill:#d8b4fe,stroke:#a78bfa
+    style E1 fill:#99f6e4,stroke:#5eead4
+    style E2 fill:#fed7aa,stroke:#fdba74
+    style E3 fill:#e9d5ff,stroke:#c4b5fd
+    style F fill:#fef3c7,stroke:#fcd34d
+```
+
+> Guardrails agent runs in parallel on every turn — PII masking, prompt injection detection, compliance check
 
 A few design decisions worth highlighting here. The clarification loop is not a failure state — it's a safety mechanism. When a user says "block my card," the supervisor needs to determine: which card? Debit or credit? Temporary or permanent? Rather than assuming, it asks. This is especially important given that BNP customers may have multiple products across retail portfolios.
 
@@ -23,6 +99,26 @@ The handoff agent deserves attention too. Not every conversation can or should b
 The FAQ agent handles the highest volume of queries: branch hours, account balances, product information, fee schedules, regulatory questions. It runs on Mistral Small for cost efficiency and latency (sub-500ms inference), paired with a retrieval-augmented generation pipeline.
 
 The RAG pipeline has several deliberate design choices worth defending.
+
+### FAQ agent — retrieval-augmented generation
+
+```mermaid
+flowchart TD
+    A[User query] --> C[Hybrid search — vector + BM25<br/><i>Reciprocal rank fusion, top-k=10</i>]
+    B[Mistral Embed] -.-> C
+    C --> D1[Product catalogue<br/><i>Accounts, cards, loans</i>]
+    C --> D2[Branch + ops data<br/><i>Hours, locations, contacts</i>]
+    C --> D3[Regulatory FAQs<br/><i>GDPR, PSD2, fees</i>]
+    D1 & D2 & D3 --> E[Cross-encoder re-ranker — top-3]
+    E --> F[Mistral Small — grounded generation]
+
+    style C fill:#d8b4fe,stroke:#a78bfa
+    style E fill:#99f6e4,stroke:#5eead4
+    style F fill:#99f6e4,stroke:#5eead4
+    style D1 fill:#e0e7ff,stroke:#c7d2fe
+    style D2 fill:#e0e7ff,stroke:#c7d2fe
+    style D3 fill:#e0e7ff,stroke:#c7d2fe
+```
 
 **Hybrid search over pure vector search.** Banking queries are often exact-match sensitive: "Livret A rate" needs the precise product name matched, not a semantic neighbor. BM25 catches these; vector search catches the paraphrased versions ("what interest do I get on my savings"). Reciprocal rank fusion merges both signals without requiring a learned fusion model.
 
@@ -37,6 +133,27 @@ Account-specific data (like "what's my balance?") does not go through RAG at all
 This is the high-stakes agent. When a customer says "lock my credit card," the system must execute that action against BNP's core banking platform — correctly, securely, and with an audit trail.
 
 The non-negotiable principle here is **double confirmation before any state-changing operation**. The flow is: the agent extracts what it thinks the user wants, presents it back in plain language for explicit confirmation ("You want to temporarily lock your Visa ending in 4821 — is that correct?"), then triggers PSD2-compliant Strong Customer Authentication before executing.
+
+### Action agent — transactional execution flow
+
+```mermaid
+flowchart TD
+    A[Supervisor routes action intent] --> B[Entity extraction + validation<br/><i>Card ID, action type, scope</i>]
+    B --> C[Explicit user confirmation<br/><i>&quot;Lock Visa ****4821 temporarily? Yes/No&quot;</i>]
+    C --> D[Step-up authentication<br/><i>OTP / biometric via SCA — PSD2</i>]
+    D --> E[Mistral function call → banking API<br/><i>POST /cards/&#123;id&#125;/lock via ESB middleware</i>]
+    E --> F[Response parsing + confirmation<br/><i>Success/failure → user-facing message</i>]
+    E --> G[Audit log<br/><i>Immutable</i>]
+    F --> H[Retry / rollback / escalate to human]
+
+    style A fill:#d8b4fe,stroke:#a78bfa
+    style B fill:#fef3c7,stroke:#fcd34d
+    style C fill:#bbf7d0,stroke:#86efac
+    style D fill:#bfdbfe,stroke:#93c5fd
+    style E fill:#fed7aa,stroke:#fdba74
+    style F fill:#fed7aa,stroke:#fdba74
+    style G fill:#fecdd3,stroke:#fda4af
+```
 
 Mistral's function calling is the mechanism for the actual API invocation. The action agent has a defined tool schema — a set of banking operations it's allowed to call, with strict parameter typing. It cannot improvise API calls. The available tool set is defined declaratively and version-controlled:
 
@@ -57,6 +174,38 @@ This agent runs in parallel on every single turn, not as a post-processing step.
 
 Let me expand on the guardrails that are specific to BNP's banking context.
 
+### Guardrails agent — parallel safety layer
+
+```mermaid
+flowchart TD
+    subgraph Input Checks
+        I1[Prompt injection detection]
+        I2[PII detection + masking]
+        I3[Topic boundary enforcement]
+        I4[Language + toxicity filter]
+    end
+
+    subgraph Output Checks
+        O1[Hallucination detection]
+        O2[PII leakage prevention]
+        O3[Financial advice disclaimer]
+        O4[Brand tone compliance]
+    end
+
+    I1 & I2 & I3 & I4 --> D[Pass / flag / block — all decisions logged to audit trail]
+    O1 & O2 & O3 & O4 --> D
+
+    style I1 fill:#fecdd3,stroke:#fda4af
+    style I2 fill:#fecdd3,stroke:#fda4af
+    style I3 fill:#fecdd3,stroke:#fda4af
+    style I4 fill:#fecdd3,stroke:#fda4af
+    style O1 fill:#fecdd3,stroke:#fda4af
+    style O2 fill:#fecdd3,stroke:#fda4af
+    style O3 fill:#fecdd3,stroke:#fda4af
+    style O4 fill:#fecdd3,stroke:#fda4af
+    style D fill:#fef3c7,stroke:#fcd34d
+```
+
 **Prompt injection detection** uses Mistral's moderation endpoint combined with a fine-tuned classifier. Banking chatbots are high-value targets — an attacker who can jailbreak the bot into revealing account data or executing unauthorized transactions has a direct financial incentive. The classifier is trained on banking-specific injection patterns, not just generic ones.
 
 **Topic boundary enforcement** is about keeping the bot in its lane. The assistant must not provide investment advice, tax guidance, or insurance recommendations unless explicitly scoped to do so with appropriate disclaimers. It should deflect political questions, personal opinions, and anything outside the retail banking domain. This is implemented as a lightweight Mistral Small classifier that runs on each turn and returns a binary allow/block signal.
@@ -71,6 +220,27 @@ Now let me address the elephant in the room: BNP's core banking infrastructure. 
 
 The **anti-corruption layer** is a critical architectural component. It sits between the AI platform and BNP's existing middleware, serving as a contract translator. The AI agents speak in tool-call JSON — structured, typed, version-controlled. The banking APIs may speak SOAP, REST, or proprietary protocols. The anti-corruption layer handles that translation without polluting either side's domain model.
 
+### Banking system integration layers
+
+```mermaid
+flowchart TD
+    A[AI platform — Mistral agents<br/><i>Hosted on BNP private cloud — no data leaves EU</i>]
+    A --> B[Anti-corruption layer — API adapter<br/><i>Translates AI tool calls → banking API contracts</i>]
+    B --> C[Enterprise service bus / middleware<br/><i>Transaction routing, protocol mediation, circuit breaker</i>]
+    C --> D1[Core banking<br/><i>Accounts, ledger</i>]
+    C --> D2[Card management<br/><i>Issuance, blocking</i>]
+    C --> D3[CRM / client 360<br/><i>Profile, preferences</i>]
+
+    style A fill:#d8b4fe,stroke:#a78bfa
+    style B fill:#bfdbfe,stroke:#93c5fd
+    style C fill:#fef3c7,stroke:#fcd34d
+    style D1 fill:#fed7aa,stroke:#fdba74
+    style D2 fill:#fed7aa,stroke:#fdba74
+    style D3 fill:#fed7aa,stroke:#fdba74
+```
+
+> All infrastructure within EU — GDPR Article 44+ compliant data residency
+
 This layer also implements **circuit breakers**. If the core banking system is experiencing degraded performance (which happens during batch processing windows, typically overnight), the circuit breaker trips and the action agent gracefully tells the user: "I can't process this right now — I'll notify you when the service is back, or you can try again in a few minutes." It does not retry indefinitely and it does not fail silently.
 
 **Data residency is non-negotiable.** The entire AI platform — model inference, vector storage, session state, audit logs — runs on BNP's private cloud infrastructure within the EU. No customer data transits to Mistral's hosted API endpoints. We deploy the models on-premise or in BNP's VPC using Mistral's enterprise deployment options.
@@ -78,6 +248,38 @@ This layer also implements **circuit breakers**. If the core banking system is e
 ## 7. Observability and continuous improvement
 
 A production AI system without observability is a liability. Here's the monitoring stack I'd propose.
+
+### Observability and feedback loops
+
+```mermaid
+flowchart TD
+    subgraph Real-time Monitoring
+        M1[Latency — P50/P99<br/><i>Per-agent traces</i>]
+        M2[Error rates<br/><i>API failures, timeouts</i>]
+        M3[Guardrail triggers<br/><i>Block rate, flag rate</i>]
+        M4[Throughput<br/><i>Msgs/sec</i>]
+    end
+
+    subgraph Quality Metrics
+        Q1[Resolution rate<br/><i>% resolved without handoff</i>]
+        Q2[CSAT / NPS<br/><i>Post-conversation survey</i>]
+        Q3[Retrieval accuracy<br/><i>Human-eval sample</i>]
+    end
+
+    M1 & M2 & M3 & M4 --> D[Dashboards + alerts]
+    Q1 & Q2 & Q3 --> D
+
+    D --> CI[Weekly review → prompt tuning → knowledge base updates → A/B test → deploy]
+
+    style M1 fill:#fef3c7,stroke:#fcd34d
+    style M2 fill:#fecdd3,stroke:#fda4af
+    style M3 fill:#fecdd3,stroke:#fda4af
+    style M4 fill:#fef3c7,stroke:#fcd34d
+    style Q1 fill:#bbf7d0,stroke:#86efac
+    style Q2 fill:#bbf7d0,stroke:#86efac
+    style Q3 fill:#bbf7d0,stroke:#86efac
+    style CI fill:#e0e7ff,stroke:#c7d2fe
+```
 
 Every conversation is traced end-to-end using distributed tracing (OpenTelemetry). Each agent invocation — supervisor classification, FAQ retrieval, action execution, guardrail check — is a span in the trace. This means when latency spikes or an error occurs, you can pinpoint exactly which component caused it.
 
@@ -88,6 +290,13 @@ The feedback loop is where the system gets smarter over time. Conversations that
 Now let me lay out the timeline. This is a phased rollout designed to minimize risk while delivering value incrementally.
 
 The phasing logic follows a risk gradient.
+
+| Phase | Name | Timeline | Key Deliverables |
+|-------|------|----------|-----------------|
+| **Phase 1** | Foundation + FAQ pilot | Weeks 1–8 | Infrastructure setup (private cloud, vector DB, Redis) · Knowledge base ingestion from BNP's CMS · FAQ agent with RAG pipeline · Guardrails agent v1 · Internal testing with BNP ops team · Deploy to 5% of web banking traffic (shadow mode, human reviews all responses) |
+| **Phase 2** | FAQ scale-up + action agent (read-only) | Weeks 9–14 | FAQ agent to 60% traffic · Action agent with read-only operations (balance inquiry, transaction history) · Supervisor agent with intent routing · Step-up authentication integration · A/B testing framework live · Mobile app channel integration |
+| **Phase 3** | Write operations + multi-channel | Weeks 15–22 | Card lock/unlock (first write operation) · Transfer initiation (with double confirmation + SCA) · Contact info updates · WhatsApp channel · Full guardrails v2 with hallucination detection · 100% FAQ traffic, 25% action traffic |
+| **Phase 4** | Full production + optimization | Weeks 23–30 | 100% traffic on all operations · Branch kiosk integration · Proactive notifications (fraud alerts, payment reminders) · Fine-tuning on BNP conversation data · Advanced analytics dashboard · Handoff to BNP internal AI team for ongoing operations |
 
 **Phase 1** is the safest possible deployment: FAQ-only, shadow mode, human-in-the-loop on every response. We're validating retrieval quality, latency, and guardrail effectiveness before any customer sees an unreviewed answer.
 
