@@ -2,6 +2,7 @@
 
 import html
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -9,7 +10,7 @@ import streamlit as st
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 LOGO_PATH = Path(__file__).parent / "static" / "logo-bnp.svg"
 
 # ─── Page Setup ───────────────────────────────────────────────────────────────
