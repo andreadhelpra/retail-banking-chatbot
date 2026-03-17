@@ -21,6 +21,10 @@ graph TD
         B[API gateway + OAuth 2.0 / mTLS<br/><i>Rate limiting, JWT validation, session binding</i>]
     end
 
+    subgraph Input Guardrails
+        G1[Input safety checks<br/><i>Prompt injection detection, topic boundary, PII masking</i>]
+    end
+
     subgraph Orchestration Layer
         C[Supervisor agent — Mistral Large<br/><i>Intent classification, routing, context mgmt</i>]
     end
@@ -28,7 +32,10 @@ graph TD
     subgraph Specialist Agents
         D1[FAQ agent<br/><i>RAG + knowledge base</i>]
         D2[Action agent<br/><i>Card lock, transfers</i>]
-        D3[Guardrails agent<br/><i>PII filter, compliance</i>]
+    end
+
+    subgraph Output Guardrails
+        G2[Output safety checks<br/><i>PII leakage prevention, hallucination detection, compliance disclaimers</i>]
     end
 
     subgraph Banking Backend
@@ -38,24 +45,30 @@ graph TD
     end
 
     A1 & A2 & A3 & A4 --> B
-    B --> C
+    B --> G1
+    G1 -- allowed --> C
+    G1 -. blocked .-> B
     C --> D1 & D2
-    C -.-> D3
     D1 --> E1
     D2 --> E2
+    D1 & D2 --> G2
+    G2 -- clean --> B
+    G2 -. PII/compliance flag .-> E3
     D2 --> E3
-    D3 -.-> E3
+    G1 -.-> E3
+    G2 -.-> E3
 
     style C fill:#d8b4fe,stroke:#a78bfa
     style D1 fill:#99f6e4,stroke:#5eead4
     style D2 fill:#fed7aa,stroke:#fdba74
-    style D3 fill:#fecdd3,stroke:#fda4af
+    style G1 fill:#fecdd3,stroke:#fda4af
+    style G2 fill:#fecdd3,stroke:#fda4af
     style E1 fill:#bfdbfe,stroke:#93c5fd
     style E2 fill:#bfdbfe,stroke:#93c5fd
     style E3 fill:#bfdbfe,stroke:#93c5fd
 ```
 
-> Purple = orchestration · Teal = retrieval · Coral = execution · Pink = safety · Blue = infrastructure
+> Purple = orchestration · Teal = retrieval · Coral = execution · Pink = safety (input + output) · Blue = infrastructure
 
 This is the 30,000-foot view. Let me now break down each critical layer, starting with the orchestration logic — the brain of the system.
 
@@ -63,7 +76,7 @@ This is the 30,000-foot view. Let me now break down each critical layer, startin
 
 The supervisor agent is the single entry point for all user messages. It runs on Mistral Large (for its superior reasoning on ambiguous intents) and performs three functions: classify the user's intent, maintain conversational context across turns, and route to the appropriate specialist. Critically, it never directly accesses banking systems — it delegates everything.
 
-Intent classification uses a structured output schema. The supervisor produces a JSON decision object that includes the detected intent category, a confidence score, extracted entities (account IDs, card references, amounts), and the target agent. If confidence falls below 0.85, it triggers a clarification turn rather than guessing — in banking, a misrouted "lock my card" is not a minor error.
+Intent classification uses a structured output schema. The supervisor produces a JSON decision object that includes the detected intent category, extracted entities (account IDs, card references, amounts), and the target agent. When the request is ambiguous, the supervisor routes to a clarification turn rather than guessing — in banking, a misrouted "lock my card" is not a minor error. The model's prompt includes explicit rules for when to clarify (e.g., user has multiple cards but didn't specify which one), which is more reliable than a numeric confidence threshold.
 
 The context window carries a compressed session state: the authenticated user's profile (pre-loaded at session start via the API gateway), the last N turns, and any pending action confirmations. This is not stored in the model's context alone — a Redis-backed session store holds the canonical state, and the supervisor rehydrates from it on each turn.
 
@@ -73,11 +86,11 @@ The context window carries a compressed session state: the authenticated user's 
 flowchart TD
     A[User message] --> B[Session rehydration — Redis]
     B --> C[Intent classification — Mistral Large<br/><i>Structured JSON output</i>]
-    C --> D{Confidence >= 0.85?}
-    D -- Yes --> E1[FAQ agent<br/><i>Mistral Small + RAG</i>]
-    D -- Yes --> E2[Action agent<br/><i>Mistral Large + tools</i>]
-    D -- Yes --> E3[Handoff agent<br/><i>Route to human</i>]
-    D -- No --> F[Clarify]
+    C --> D{Intent}
+    D -- faq --> E1[FAQ agent<br/><i>Mistral Small + RAG</i>]
+    D -- action --> E2[Action agent<br/><i>Mistral Large + tools</i>]
+    D -- handoff --> E3[Handoff agent<br/><i>Route to human</i>]
+    D -- clarify --> F[Clarify<br/><i>Ambiguous request — ask for details</i>]
 
     F --> A
 
@@ -88,7 +101,7 @@ flowchart TD
     style F fill:#fef3c7,stroke:#fcd34d
 ```
 
-> Guardrails agent runs in parallel on every turn — PII masking, prompt injection detection, compliance check
+> Guardrails run on every turn — input checks before routing, output checks before responding (see diagram 1)
 
 A few design decisions worth highlighting here. The clarification loop is not a failure state — it's a safety mechanism. When a user says "block my card," the supervisor needs to determine: which card? Debit or credit? Temporary or permanent? Rather than assuming, it asks. This is especially important given that BNP customers may have multiple products across retail portfolios.
 

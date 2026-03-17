@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from app.config import CONFIDENCE_THRESHOLD, MISTRAL_LARGE_MODEL
+from app.config import MISTRAL_LARGE_MODEL
 from app.models.schemas import IntentClassification, SessionState
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,6 @@ Your job is to classify the user's intent and extract relevant entities.
 
 You must respond with a JSON object containing:
 - "intent": one of "faq", "action", "handoff", "clarify"
-- "confidence": a float between 0 and 1
 - "entities": an object with extracted entities (card_id, account_id, account_type, card_type, lock_type, days, etc.)
 - "clarification_question": a string (only if intent is "clarify")
 
@@ -33,7 +32,6 @@ Rules:
 - If the user mentions "account" but has multiple accounts without specifying which, and the action requires a specific account, set intent to "clarify".
 - For balance checks, if the user says "my balance" without specifying, default to the checking account.
 - If the user says they lost or had their card stolen, set intent to "action" with entities including lock_type ("temporary" for lost, "permanent" for stolen).
-- If confidence is below {confidence_threshold}, set intent to "clarify".
 - For "block my card" without specifying which card, set intent to "clarify" and ask which card they want to block.
 """
 
@@ -58,7 +56,6 @@ async def classify_intent(
         customer_name=customer_data.get("name", "Unknown"),
         accounts_summary=accounts_summary or "None",
         cards_summary=cards_summary or "None",
-        confidence_threshold=CONFIDENCE_THRESHOLD,
     )
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -80,23 +77,15 @@ async def classify_intent(
 
         intent = IntentClassification(
             intent=data.get("intent", "clarify"),
-            confidence=data.get("confidence", 0.5),
             entities=data.get("entities", {}),
             clarification_question=data.get("clarification_question"),
         )
 
         logger.info(
             f"[SUPERVISOR] Intent: {intent.intent.upper()} | "
-            f"Confidence: {intent.confidence:.2f} | "
             f"Entities: {intent.entities} | "
             f"Routing to: {'supervisor (clarify/handoff)' if intent.intent in ('clarify', 'handoff') else intent.intent + '_agent'}"
         )
-
-        if intent.confidence < CONFIDENCE_THRESHOLD and intent.intent not in ("clarify", "handoff"):
-            logger.info(f"[SUPERVISOR] Confidence below threshold ({CONFIDENCE_THRESHOLD}), forcing clarification")
-            intent.intent = "clarify"
-            if not intent.clarification_question:
-                intent.clarification_question = "Could you please provide more details about what you need help with?"
 
         return intent
 
@@ -104,7 +93,6 @@ async def classify_intent(
         logger.error(f"[SUPERVISOR] Error classifying intent: {e}")
         return IntentClassification(
             intent="clarify",
-            confidence=0.0,
             entities={},
             clarification_question="I'm sorry, could you rephrase that? I want to make sure I understand your request correctly.",
         )

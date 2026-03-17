@@ -107,7 +107,7 @@ async def chat(request: ChatRequest):
     if not session:
         return ChatResponse(
             response="Session not found. Please initialize a new session.",
-            debug=DebugInfo(agent="error", intent="error", confidence=0.0),
+            debug=DebugInfo(agent="error", intent="error"),
         )
 
     customer_data = banking_service.get_customer(session.customer_id)
@@ -121,7 +121,6 @@ async def chat(request: ChatRequest):
             debug=DebugInfo(
                 agent="guardrails",
                 intent=input_check["reason"],
-                confidence=1.0,
             ),
         )
 
@@ -137,7 +136,6 @@ async def chat(request: ChatRequest):
             debug=DebugInfo(
                 agent="action",
                 intent="action",
-                confidence=1.0,
                 tool_calls=result.get("tool_calls"),
             ),
         )
@@ -154,7 +152,6 @@ async def chat(request: ChatRequest):
             debug=DebugInfo(
                 agent="supervisor",
                 intent="clarify",
-                confidence=intent.confidence,
                 entities=intent.entities,
             ),
         )
@@ -166,7 +163,6 @@ async def chat(request: ChatRequest):
             debug=DebugInfo(
                 agent="supervisor",
                 intent="handoff",
-                confidence=intent.confidence,
                 entities=intent.entities,
             ),
         )
@@ -177,7 +173,7 @@ async def chat(request: ChatRequest):
             _add_to_history(session, message, response_text)
             return ChatResponse(
                 response=response_text,
-                debug=DebugInfo(agent="faq", intent="faq", confidence=intent.confidence),
+                debug=DebugInfo(agent="faq", intent="faq"),
             )
 
         result = await handle_faq(mistral_client, faq_retriever, message)
@@ -195,7 +191,6 @@ async def chat(request: ChatRequest):
             debug=DebugInfo(
                 agent="faq",
                 intent="faq",
-                confidence=intent.confidence,
                 entities=intent.entities,
                 retrieved_chunks=result.get("retrieved_chunks"),
             ),
@@ -219,7 +214,6 @@ async def chat(request: ChatRequest):
             debug=DebugInfo(
                 agent="action",
                 intent="action",
-                confidence=intent.confidence,
                 entities=intent.entities,
                 tool_calls=result.get("tool_calls"),
             ),
@@ -228,7 +222,7 @@ async def chat(request: ChatRequest):
     # Fallback
     return ChatResponse(
         response="I'm not sure how to help with that. Could you rephrase?",
-        debug=DebugInfo(agent="supervisor", intent="unknown", confidence=0.0),
+        debug=DebugInfo(agent="supervisor", intent="unknown"),
     )
 
 

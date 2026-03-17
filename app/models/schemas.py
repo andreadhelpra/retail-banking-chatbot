@@ -12,7 +12,6 @@ class ChatRequest(BaseModel):
 
 class IntentClassification(BaseModel):
     intent: Literal["faq", "action", "handoff", "clarify"]
-    confidence: float = Field(ge=0.0, le=1.0)
     entities: dict[str, Any] = Field(default_factory=dict)
     clarification_question: str | None = None
 
@@ -26,7 +25,6 @@ class PendingAction(BaseModel):
 class DebugInfo(BaseModel):
     agent: str
     intent: str
-    confidence: float
     entities: dict[str, Any] = Field(default_factory=dict)
     retrieved_chunks: list[str] | None = None
     tool_calls: list[dict[str, Any]] | None = None

@@ -16,16 +16,14 @@ def test_chat_request_valid():
 def test_intent_classification():
     intent = IntentClassification(
         intent="faq",
-        confidence=0.92,
         entities={},
         clarification_question=None,
     )
     assert intent.intent == "faq"
-    assert intent.confidence == 0.92
 
 
 def test_debug_info_defaults():
-    debug = DebugInfo(agent="faq", intent="faq", confidence=0.9)
+    debug = DebugInfo(agent="faq", intent="faq")
     assert debug.retrieved_chunks is None
     assert debug.tool_calls is None
     assert debug.entities == {}
@@ -34,7 +32,7 @@ def test_debug_info_defaults():
 def test_chat_response():
     resp = ChatResponse(
         response="Hello!",
-        debug=DebugInfo(agent="supervisor", intent="clarify", confidence=0.7),
+        debug=DebugInfo(agent="supervisor", intent="clarify"),
     )
     assert resp.response == "Hello!"
     assert resp.debug.agent == "supervisor"

@@ -10,7 +10,10 @@ import streamlit as st
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+try:
+    API_BASE_URL = st.secrets["API_BASE_URL"]
+except (FileNotFoundError, KeyError):
+    API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 LOGO_PATH = Path(__file__).parent / "static" / "logo-bnp.svg"
 
 # ─── Page Setup ───────────────────────────────────────────────────────────────
@@ -481,36 +484,6 @@ header[data-testid="stHeader"] {
     word-break: break-word;
 }
 
-/* Confidence bar */
-.confidence-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.confidence-track {
-    flex: 1;
-    height: 4px;
-    background: var(--bnp-gray-200);
-    border-radius: 2px;
-    overflow: hidden;
-    max-width: 120px;
-}
-
-.confidence-fill {
-    height: 100%;
-    border-radius: 2px;
-    background: var(--bnp-green);
-    transition: width 0.3s ease;
-}
-
-.confidence-text {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--bnp-green-dark);
-    font-family: var(--font);
-}
-
 /* Chat input */
 [data-testid="stChatInput"] {
     border-color: var(--bnp-gray-300) !important;
@@ -685,25 +658,13 @@ def render_debug_details(debug: dict):
     """Render full debug details inside an expander."""
     agent = debug.get("agent", "N/A")
     intent = debug.get("intent", "N/A")
-    confidence = debug.get("confidence", 0)
 
-    # Grid of metadata
-    conf_pct = int(confidence * 100)
     st.markdown(
         f"""<div class="debug-grid">
             <span class="debug-label">Agent</span>
             <span class="debug-value"><code>{html.escape(str(agent))}</code></span>
             <span class="debug-label">Intent</span>
             <span class="debug-value"><code>{html.escape(str(intent))}</code></span>
-            <span class="debug-label">Confidence</span>
-            <span class="debug-value">
-                <div class="confidence-bar">
-                    <div class="confidence-track">
-                        <div class="confidence-fill" style="width: {conf_pct}%"></div>
-                    </div>
-                    <span class="confidence-text">{conf_pct}%</span>
-                </div>
-            </span>
         </div>""",
         unsafe_allow_html=True,
     )
