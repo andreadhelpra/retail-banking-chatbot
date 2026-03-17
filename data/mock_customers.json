@@ -1,0 +1,56 @@
+{
+  "customers": [
+    {
+      "id": "cust_001",
+      "name": "Jean Dupont",
+      "email": "jean.dupont@email.com",
+      "phone": "+33 6 12 34 56 78",
+      "accounts": [
+        {"id": "acc_001", "type": "checking", "label": "Compte Courant", "balance": 3245.67, "currency": "EUR", "iban": "FR76 3000 1007 1600 0000 0000 123"},
+        {"id": "acc_002", "type": "savings", "label": "Livret A", "balance": 15780.00, "currency": "EUR", "iban": "FR76 3000 1007 1600 0000 0000 456"}
+      ],
+      "cards": [
+        {"id": "card_001", "type": "debit", "label": "Visa Classic", "last_four": "7842", "expiry": "09/2027", "status": "active", "account_id": "acc_001"},
+        {"id": "card_002", "type": "credit", "label": "Visa Premier", "last_four": "4821", "expiry": "03/2028", "status": "active", "account_id": "acc_001"}
+      ],
+      "transactions": [
+        {"id": "tx_001", "account_id": "acc_001", "date": "2026-03-17", "description": "Carrefour Market", "amount": -67.32, "category": "groceries"},
+        {"id": "tx_002", "account_id": "acc_001", "date": "2026-03-16", "description": "SNCF Voyages", "amount": -124.00, "category": "transport"},
+        {"id": "tx_003", "account_id": "acc_001", "date": "2026-03-15", "description": "Salary - BNP Paribas", "amount": 3200.00, "category": "income"},
+        {"id": "tx_004", "account_id": "acc_001", "date": "2026-03-14", "description": "Amazon.fr", "amount": -45.99, "category": "shopping"},
+        {"id": "tx_005", "account_id": "acc_001", "date": "2026-03-13", "description": "EDF Electricite", "amount": -89.50, "category": "utilities"},
+        {"id": "tx_006", "account_id": "acc_001", "date": "2026-03-12", "description": "Restaurant Le Petit Bistro", "amount": -38.00, "category": "dining"},
+        {"id": "tx_007", "account_id": "acc_001", "date": "2026-03-11", "description": "Pharmacie du Centre", "amount": -12.80, "category": "health"},
+        {"id": "tx_008", "account_id": "acc_001", "date": "2026-03-10", "description": "Boulangerie Paul", "amount": -8.50, "category": "dining"},
+        {"id": "tx_009", "account_id": "acc_001", "date": "2026-03-09", "description": "Netflix", "amount": -13.49, "category": "entertainment"},
+        {"id": "tx_010", "account_id": "acc_001", "date": "2026-03-08", "description": "Total Energies - Fuel", "amount": -72.00, "category": "transport"},
+        {"id": "tx_011", "account_id": "acc_001", "date": "2026-03-07", "description": "Decathlon", "amount": -95.00, "category": "shopping"},
+        {"id": "tx_012", "account_id": "acc_001", "date": "2026-03-06", "description": "Loyer Mars 2026", "amount": -950.00, "category": "housing"},
+        {"id": "tx_013", "account_id": "acc_001", "date": "2026-03-05", "description": "Monoprix", "amount": -34.21, "category": "groceries"},
+        {"id": "tx_014", "account_id": "acc_001", "date": "2026-03-04", "description": "Uber", "amount": -18.50, "category": "transport"},
+        {"id": "tx_015", "account_id": "acc_001", "date": "2026-03-03", "description": "Fnac", "amount": -29.99, "category": "shopping"},
+        {"id": "tx_016", "account_id": "acc_002", "date": "2026-03-01", "description": "Monthly interest", "amount": 39.45, "category": "interest"},
+        {"id": "tx_017", "account_id": "acc_002", "date": "2026-02-01", "description": "Monthly interest", "amount": 39.45, "category": "interest"},
+        {"id": "tx_018", "account_id": "acc_002", "date": "2026-01-15", "description": "Transfer from Checking", "amount": 500.00, "category": "transfer"}
+      ]
+    },
+    {
+      "id": "cust_002",
+      "name": "Marie Laurent",
+      "email": "marie.laurent@email.com",
+      "phone": "+33 6 98 76 54 32",
+      "accounts": [
+        {"id": "acc_003", "type": "checking", "label": "Compte Courant", "balance": 1890.45, "currency": "EUR", "iban": "FR76 3000 1007 1600 0000 0000 789"},
+        {"id": "acc_004", "type": "savings", "label": "Livret A", "balance": 8500.00, "currency": "EUR", "iban": "FR76 3000 1007 1600 0000 0000 012"}
+      ],
+      "cards": [
+        {"id": "card_003", "type": "debit", "label": "Visa Classic", "last_four": "3156", "expiry": "11/2027", "status": "active", "account_id": "acc_003"},
+        {"id": "card_004", "type": "credit", "label": "Visa Gold", "last_four": "9073", "expiry": "06/2028", "status": "active", "account_id": "acc_003"}
+      ],
+      "transactions": [
+        {"id": "tx_019", "account_id": "acc_003", "date": "2026-03-17", "description": "Leclerc", "amount": -52.10, "category": "groceries"},
+        {"id": "tx_020", "account_id": "acc_003", "date": "2026-03-16", "description": "Zara", "amount": -89.00, "category": "shopping"}
+      ]
+    }
+  ]
+}
