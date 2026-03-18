@@ -78,13 +78,13 @@ The supervisor agent is the single entry point for all user messages. It runs on
 
 Intent classification uses a structured output schema. The supervisor produces a JSON decision object that includes the detected intent category, extracted entities (account IDs, card references, amounts), and the target agent. When the request is ambiguous, the supervisor routes to a clarification turn rather than guessing — in banking, a misrouted "lock my card" is not a minor error. The model's prompt includes explicit rules for when to clarify (e.g., user has multiple cards but didn't specify which one), which is more reliable than a numeric confidence threshold.
 
-The context window carries a compressed session state: the authenticated user's profile (pre-loaded at session start via the API gateway), the last N turns, and any pending action confirmations. This is not stored in the model's context alone — a Redis-backed session store holds the canonical state, and the supervisor rehydrates from it on each turn.
+The context window carries the session state: the authenticated user's profile (pre-loaded at session start), the last N turns, and any pending action confirmations. Currently sessions are held in-memory on the server. A production deployment would move this to a Redis-backed session store for persistence and horizontal scaling.
 
 ### Supervisor agent routing flow
 
 ```mermaid
 flowchart TD
-    A[User message] --> B[Session rehydration — Redis]
+    A[User message] --> B[Session lookup — in-memory]
     B --> C[Intent classification — Mistral Large<br/><i>Structured JSON output</i>]
     C --> D{Intent}
     D -- faq --> E1[FAQ agent<br/><i>Mistral Small + RAG</i>]
@@ -117,27 +117,23 @@ The RAG pipeline has several deliberate design choices worth defending.
 
 ```mermaid
 flowchart TD
-    A[User query] --> C[Hybrid search — vector + BM25<br/><i>Reciprocal rank fusion, top-k=10</i>]
+    A[User query] --> C[Vector search — cosine similarity<br/><i>Mistral Embed, top-k=3</i>]
     B[Mistral Embed] -.-> C
     C --> D1[Product catalogue<br/><i>Accounts, cards, loans</i>]
     C --> D2[Branch + ops data<br/><i>Hours, locations, contacts</i>]
     C --> D3[Regulatory FAQs<br/><i>GDPR, PSD2, fees</i>]
-    D1 & D2 & D3 --> E[Cross-encoder re-ranker — top-3]
-    E --> F[Mistral Small — grounded generation]
+    D1 & D2 & D3 --> F[Mistral Small — grounded generation<br/><i>Top-3 chunks by similarity</i>]
 
     style C fill:#d8b4fe,stroke:#a78bfa
-    style E fill:#99f6e4,stroke:#5eead4
     style F fill:#99f6e4,stroke:#5eead4
     style D1 fill:#e0e7ff,stroke:#c7d2fe
     style D2 fill:#e0e7ff,stroke:#c7d2fe
     style D3 fill:#e0e7ff,stroke:#c7d2fe
 ```
 
-**Hybrid search over pure vector search.** Banking queries are often exact-match sensitive: "Livret A rate" needs the precise product name matched, not a semantic neighbor. BM25 catches these; vector search catches the paraphrased versions ("what interest do I get on my savings"). Reciprocal rank fusion merges both signals without requiring a learned fusion model.
+**Vector search with Mistral Embed.** The current prototype uses pure vector search — cosine similarity over in-memory embeddings. A production enhancement would add BM25 as a complementary signal with reciprocal rank fusion, since banking queries are often exact-match sensitive ("Livret A rate" needs the precise product name matched, not a semantic neighbor).
 
-**Cross-encoder re-ranking.** The initial retrieval is cheap and broad (top-10). The re-ranker is expensive but precise — it scores each query-document pair with full cross-attention. This two-stage approach keeps latency under 300ms for the retrieval step while dramatically improving relevance.
-
-Account-specific data (like "what's my balance?") does not go through RAG at all. The supervisor detects these as account queries and routes them to a thin API call via the banking middleware, injecting the result into the FAQ agent's prompt as structured data. The vector database never stores PII or account-level information.
+Account-specific data (like "what's my balance?") does not go through RAG at all. The supervisor detects these as account queries and routes them to a thin API call via the banking middleware, injecting the result into the FAQ agent's prompt as structured data. The knowledge base never stores PII or account-level information.
 
 **Knowledge base maintenance** is a first-class concern. BNP's product catalog, fee schedules, and regulatory information change. The ingestion pipeline must support incremental updates with version control — when a fee changes, the old chunk is tombstoned and the new one is embedded and indexed. I'd recommend a nightly sync from BNP's CMS with a manual trigger for urgent regulatory updates.
 

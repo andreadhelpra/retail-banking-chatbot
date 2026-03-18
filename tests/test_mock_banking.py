@@ -10,7 +10,7 @@ def bank():
 def test_load_customers(bank):
     customer = bank.get_customer("cust_001")
     assert customer is not None
-    assert customer["name"] == "Jean Dupont"
+    assert customer["name"] == "Andrea Dhelpra"
 
 
 def test_get_customer_not_found(bank):
