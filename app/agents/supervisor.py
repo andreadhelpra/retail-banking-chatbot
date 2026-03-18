@@ -19,7 +19,7 @@ You must respond with a JSON object containing:
 
 Intent definitions:
 - "faq": User asks a general banking question (hours, rates, fees, how-to). No account-specific action needed.
-- "action": User wants to perform an operation on their account (check balance, view transactions, lock a card).
+- "action": User wants to perform an operation on their account (check balance, view transactions, lock a card, transfer money between accounts).
 - "handoff": User has a complaint, dispute, or complex issue that requires a human agent.
 - "clarify": The user's request is ambiguous and you need more information to route correctly.
 
@@ -32,7 +32,9 @@ Rules:
 - If the user mentions "account" but has multiple accounts without specifying which, and the action requires a specific account, set intent to "clarify".
 - For balance checks, if the user says "my balance" without specifying, default to the checking account.
 - If the user says they lost or had their card stolen, set intent to "action" with entities including lock_type ("temporary" for lost, "permanent" for stolen).
+- For transfers between accounts, set intent to "action" with entities including from_account_type, to_account_type, and amount. Do NOT ask for confirmation yourself — the action agent handles that.
 - For "block my card" without specifying which card, set intent to "clarify" and ask which card they want to block.
+- When the intent is clear, route to "action" immediately. Do NOT generate your own confirmation questions for actions — the action agent handles confirmations.
 """
 
 
@@ -90,7 +92,8 @@ async def classify_intent(
         return intent
 
     except (json.JSONDecodeError, KeyError, Exception) as e:
-        logger.error(f"[SUPERVISOR] Error classifying intent: {e}")
+        import traceback
+        logger.error(f"[SUPERVISOR] Error classifying intent: {e}\n{traceback.format_exc()}")
         return IntentClassification(
             intent="clarify",
             entities={},

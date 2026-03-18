@@ -83,6 +83,69 @@ class MockBankingService:
                     }
         return {"success": False, "card_id": card_id, "message": "Card not found"}
 
+    def transfer(self, from_account_id: str, to_account_id: str, amount: float) -> dict[str, Any]:
+        """Transfer funds between accounts belonging to the same customer."""
+        from_account = None
+        to_account = None
+        from_customer = None
+
+        for customer in self._customers.values():
+            for account in customer["accounts"]:
+                if account["id"] == from_account_id:
+                    from_account = account
+                    from_customer = customer
+                if account["id"] == to_account_id:
+                    to_account = account
+
+        if not from_account:
+            return {"success": False, "message": f"Source account {from_account_id} not found."}
+        if not to_account:
+            return {"success": False, "message": f"Destination account {to_account_id} not found."}
+        if amount <= 0:
+            return {"success": False, "message": "Transfer amount must be positive."}
+        if from_account["balance"] < amount:
+            return {
+                "success": False,
+                "message": f"Insufficient funds. Available balance: {from_account['balance']:,.2f} {from_account['currency']}.",
+            }
+        if from_account_id == to_account_id:
+            return {"success": False, "message": "Cannot transfer to the same account."}
+
+        from_account["balance"] -= amount
+        to_account["balance"] += amount
+
+        # Record transactions
+        tx_date = datetime.now().strftime("%Y-%m-%d")
+        tx_id_out = f"tx_{len(from_customer['transactions']) + 1:03d}"
+        from_customer["transactions"].append({
+            "id": tx_id_out,
+            "account_id": from_account_id,
+            "date": tx_date,
+            "description": f"Transfer to {to_account['label']}",
+            "amount": -amount,
+            "category": "transfer",
+        })
+        tx_id_in = f"tx_{len(from_customer['transactions']) + 1:03d}"
+        from_customer["transactions"].append({
+            "id": tx_id_in,
+            "account_id": to_account_id,
+            "date": tx_date,
+            "description": f"Transfer from {from_account['label']}",
+            "amount": amount,
+            "category": "transfer",
+        })
+
+        return {
+            "success": True,
+            "from_account": from_account_id,
+            "to_account": to_account_id,
+            "amount": amount,
+            "currency": from_account["currency"],
+            "new_from_balance": from_account["balance"],
+            "new_to_balance": to_account["balance"],
+            "message": f"Successfully transferred {amount:,.2f} {from_account['currency']} from {from_account['label']} to {to_account['label']}.",
+        }
+
     def find_account_for_customer(self, customer_id: str, account_type: str | None = None) -> dict[str, Any] | None:
         accounts = self.get_customer_accounts(customer_id)
         if account_type:

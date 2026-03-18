@@ -5,6 +5,12 @@ import logging
 from typing import Any
 
 from app.config import MISTRAL_LARGE_MODEL
+
+try:
+    from mistralai.models import ToolChoiceEnum
+    TOOL_CHOICE_ANY = ToolChoiceEnum.any
+except (ImportError, Exception):
+    TOOL_CHOICE_ANY = "any"
 from app.models.schemas import IntentClassification, PendingAction, SessionState
 from app.services.mock_banking import MockBankingService
 
@@ -71,6 +77,31 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "transfer",
+            "description": "Transfer funds between the customer's own accounts (e.g., from checking to savings or vice versa).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from_account_id": {
+                        "type": "string",
+                        "description": "The source account ID (e.g., 'acc_001')",
+                    },
+                    "to_account_id": {
+                        "type": "string",
+                        "description": "The destination account ID (e.g., 'acc_002')",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "The amount to transfer in EUR",
+                    },
+                },
+                "required": ["from_account_id", "to_account_id", "amount"],
+            },
+        },
+    },
 ]
 
 ACTION_SYSTEM_PROMPT = """You are the action agent for BNP Paribas retail banking assistant.
@@ -81,12 +112,14 @@ Their accounts: {accounts_summary}
 Their cards: {cards_summary}
 
 Rules:
-- Use the tools to fulfill the customer's request.
+- ALWAYS use the available tools to fulfill the customer's request. Never decline an action you have a tool for.
 - For balance checks, use get_balance with the appropriate account_id.
 - For transaction history, use get_transactions with the account_id and number of days.
 - For card locking, use lock_card with the card_id and lock_type.
+- For transfers between accounts, use the transfer tool with from_account_id, to_account_id, and amount. You CAN perform transfers between the customer's own accounts.
 - If the user says "my account" or "my balance" without specifying, use the checking account by default.
 - Always use the actual account/card IDs from the customer's profile, not user-provided values.
+- Do NOT tell the user to use the mobile app or online banking. You have the tools to handle their request directly.
 """
 
 
@@ -128,9 +161,11 @@ async def handle_action(
             model=MISTRAL_LARGE_MODEL,
             messages=messages,
             tools=TOOLS,
+            tool_choice=TOOL_CHOICE_ANY,
         )
 
         choice = response.choices[0]
+        logger.info(f"[ACTION] Raw response: tool_calls={choice.message.tool_calls}, content={choice.message.content[:100] if choice.message.content else None}")
 
         if choice.message.tool_calls:
             tool_call = choice.message.tool_calls[0]
@@ -162,9 +197,10 @@ async def handle_action(
         }
 
     except Exception as e:
-        logger.error(f"[ACTION] Error: {e}")
+        import traceback
+        logger.error(f"[ACTION] Error: {e}\n{traceback.format_exc()}")
         return {
-            "response": "I'm experiencing a temporary issue processing your request. Please try again in a moment.",
+            "response": f"I'm experiencing a temporary issue processing your request. Please try again in a moment. (Debug: {type(e).__name__}: {e})",
             "tool_calls": None,
         }
 
@@ -236,6 +272,21 @@ async def _execute_tool(
         else:
             response = f"I wasn't able to lock the card. {result['message']}"
 
+    elif tool_name == "transfer":
+        result = banking_service.transfer(
+            arguments["from_account_id"],
+            arguments["to_account_id"],
+            arguments["amount"],
+        )
+        if result["success"]:
+            response = (
+                f"Done! {result['message']}\n\n"
+                f"- **{result['from_account']}** new balance: **{result['new_from_balance']:,.2f} {result['currency']}**\n"
+                f"- **{result['to_account']}** new balance: **{result['new_to_balance']:,.2f} {result['currency']}**"
+            )
+        else:
+            response = f"Transfer failed. {result['message']}"
+
     else:
         response = "I'm sorry, I don't know how to handle that operation."
         result = {}
@@ -264,6 +315,21 @@ def _build_confirmation_message(
                 break
         return (
             f"You'd like to **{lock_type}ly lock** your {card_info or card_id}. "
+            f"Shall I proceed? (yes/no)"
+        )
+    if tool_name == "transfer":
+        amount = arguments.get("amount", 0)
+        from_id = arguments.get("from_account_id", "")
+        to_id = arguments.get("to_account_id", "")
+        from_label = from_id
+        to_label = to_id
+        for acc in customer_data.get("accounts", []):
+            if acc["id"] == from_id:
+                from_label = acc["label"]
+            if acc["id"] == to_id:
+                to_label = acc["label"]
+        return (
+            f"You'd like to transfer **{amount:,.2f} EUR** from **{from_label}** to **{to_label}**. "
             f"Shall I proceed? (yes/no)"
         )
     return f"You'd like to execute {tool_name}. Shall I proceed? (yes/no)"
