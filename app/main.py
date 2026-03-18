@@ -77,6 +77,10 @@ app.add_middleware(
 
 @app.post("/session/init", response_model=SessionInfo)
 async def init_session():
+    global banking_service
+    # Reload mock data so each session starts fresh
+    banking_service = MockBankingService()
+
     session_id = str(uuid.uuid4())
     customer = banking_service.get_customer(DEFAULT_CUSTOMER_ID)
 

@@ -19,7 +19,7 @@ You must respond with a JSON object containing:
 
 Intent definitions:
 - "faq": User asks a general banking question (hours, rates, fees, how-to). No account-specific action needed.
-- "action": User wants to perform an operation on their account (check balance, view transactions, lock a card, transfer money between accounts).
+- "action": User wants to perform an operation on their account (check balance, view transactions, lock a card, unlock a card, transfer money between accounts).
 - "handoff": User has a complaint, dispute, or complex issue that requires a human agent.
 - "clarify": The user's request is ambiguous and you need more information to route correctly.
 

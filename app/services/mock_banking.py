@@ -67,11 +67,17 @@ class MockBankingService:
         for customer in self._customers.values():
             for card in customer["cards"]:
                 if card["id"] == card_id:
-                    if card["status"] != "active":
+                    if card["status"] == "permanently_locked":
                         return {
                             "success": False,
                             "card_id": card_id,
-                            "message": f"Card is already {card['status']}. Cannot lock.",
+                            "message": f"Card is already permanently locked.",
+                        }
+                    if card["status"] == "temporarily_locked" and lock_type == "temporary":
+                        return {
+                            "success": False,
+                            "card_id": card_id,
+                            "message": f"Card is already temporarily locked.",
                         }
                     new_status = "temporarily_locked" if lock_type == "temporary" else "permanently_locked"
                     card["status"] = new_status
@@ -145,6 +151,30 @@ class MockBankingService:
             "new_to_balance": to_account["balance"],
             "message": f"Successfully transferred {amount:,.2f} {from_account['currency']} from {from_account['label']} to {to_account['label']}.",
         }
+
+    def unlock_card(self, card_id: str) -> dict[str, Any]:
+        for customer in self._customers.values():
+            for card in customer["cards"]:
+                if card["id"] == card_id:
+                    if card["status"] == "active":
+                        return {
+                            "success": False,
+                            "card_id": card_id,
+                            "message": "Card is already active.",
+                        }
+                    if card["status"] == "permanently_locked":
+                        return {
+                            "success": False,
+                            "card_id": card_id,
+                            "message": "Cannot unlock a permanently locked card. Please contact your branch to request a replacement.",
+                        }
+                    card["status"] = "active"
+                    return {
+                        "success": True,
+                        "card_id": card_id,
+                        "message": f"Card ****{card['last_four']} has been unlocked and is now active.",
+                    }
+        return {"success": False, "card_id": card_id, "message": "Card not found"}
 
     def find_account_for_customer(self, customer_id: str, account_type: str | None = None) -> dict[str, Any] | None:
         accounts = self.get_customer_accounts(customer_id)

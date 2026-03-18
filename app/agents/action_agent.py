@@ -42,6 +42,23 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "unlock_card",
+            "description": "Unlock a temporarily locked bank card, restoring it to active status. Cannot unlock permanently locked cards.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "card_id": {
+                        "type": "string",
+                        "description": "The card ID to unlock (e.g., 'card_001')",
+                    },
+                },
+                "required": ["card_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_balance",
             "description": "Get the current balance of a bank account.",
             "parameters": {
@@ -116,10 +133,12 @@ Rules:
 - For balance checks, use get_balance with the appropriate account_id.
 - For transaction history, use get_transactions with the account_id and number of days.
 - For card locking, use lock_card with the card_id and lock_type.
+- For card UNLOCKING, use unlock_card (NOT lock_card). Only temporarily locked cards can be unlocked.
 - For transfers between accounts, use the transfer tool with from_account_id, to_account_id, and amount. You CAN perform transfers between the customer's own accounts.
 - If the user says "my account" or "my balance" without specifying, use the checking account by default.
 - Always use the actual account/card IDs from the customer's profile, not user-provided values.
 - Do NOT tell the user to use the mobile app or online banking. You have the tools to handle their request directly.
+- Pay close attention to whether the user wants to LOCK or UNLOCK — these are completely different tools.
 """
 
 
@@ -153,15 +172,20 @@ async def handle_action(
                 cards_summary=cards_summary,
             ),
         },
-        {"role": "user", "content": message},
     ]
+
+    # Include conversation history so the model has context
+    for turn in session.conversation_history[-10:]:
+        messages.append(turn)
+
+    messages.append({"role": "user", "content": message})
 
     try:
         response = await mistral_client.chat.complete_async(
             model=MISTRAL_LARGE_MODEL,
             messages=messages,
             tools=TOOLS,
-            tool_choice=TOOL_CHOICE_ANY,
+            tool_choice="auto",
         )
 
         choice = response.choices[0]
@@ -272,6 +296,13 @@ async def _execute_tool(
         else:
             response = f"I wasn't able to lock the card. {result['message']}"
 
+    elif tool_name == "unlock_card":
+        result = banking_service.unlock_card(arguments["card_id"])
+        if result["success"]:
+            response = f"Done! {result['message']} If you need further assistance, please don't hesitate to ask."
+        else:
+            response = f"I wasn't able to unlock the card. {result['message']}"
+
     elif tool_name == "transfer":
         result = banking_service.transfer(
             arguments["from_account_id"],
@@ -317,6 +348,14 @@ def _build_confirmation_message(
             f"You'd like to **{lock_type}ly lock** your {card_info or card_id}. "
             f"Shall I proceed? (yes/no)"
         )
+    if tool_name == "unlock_card":
+        card_id = arguments.get("card_id", "")
+        card_info = card_id
+        for card in customer_data.get("cards", []):
+            if card["id"] == card_id:
+                card_info = f"{card['label']} ending in ****{card['last_four']}"
+                break
+        return f"You'd like to **unlock** your {card_info}. Shall I proceed? (yes/no)"
     if tool_name == "transfer":
         amount = arguments.get("amount", 0)
         from_id = arguments.get("from_account_id", "")
